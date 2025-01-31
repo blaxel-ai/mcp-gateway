@@ -19,7 +19,7 @@
     "client": "node dist/client.js"
   },
   "bin": {
-    "beamlit-mcp-gateway": "dist/index.js"
+    "mcp-gateway": "dist/index.js"
   },
   "files": [
     "dist"

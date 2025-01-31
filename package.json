@@ -1,0 +1,36 @@
+{
+  "name": "@beamlit/mcp-gateway",
+  "version": "1.0.1",
+  "description": "MCP Gateway for Beamlit",
+  "license": "MIT",
+  "author": "Beamlit, Inc. (https://beamlit.com)",
+  "homepage": "https://beamlit.com",
+  "bugs": "https://github.com/beamlit/mcp-gateway/issues",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/beamlit/mcp-gateway.git"
+  },
+  "scripts": {
+    "build": "tsc && shx chmod +x dist/*.js",
+    "prepare": "npm run build",
+    "watch": "tsc --watch",
+    "start": "node dist/index.js",
+    "client": "node dist/client.js"
+  },
+  "bin": {
+    "beamlit-mcp-gateway": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@beamlit/sdk": "^0.0.41",
+    "@modelcontextprotocol/sdk": "1.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "shx": "^0.3.4",
+    "typescript": "^5.6.2"
+  }
+}

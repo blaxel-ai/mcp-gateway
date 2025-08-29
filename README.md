@@ -22,11 +22,10 @@ Add this to your MCP configuration:
       "command": "npx",
       "args": [
         "-y",
-        "@blaxel/mcp-gateway@latest"
-      ],
-      "env": {
-        "MCP_WEBSOCKET_URL": "wss://run.blaxel.ai/{YOUR_WORKSPACE}/functions/{YOUR_MCP_SERVER_NAME}"
-      }
+        "@blaxel/mcp-gateway@latest",
+        "--url",
+        "wss://run.blaxel.ai/{YOUR_WORKSPACE}/functions/{YOUR_MCP_SERVER_NAME}"
+      ]
     }
   }
 }
@@ -40,27 +39,35 @@ Add this to your MCP configuration:
 
 ## Installation
 
+Run directly with npx (recommended):
+
 ```bash
-npm install -g @blaxel/mcp-gateway
+npx -y @blaxel/mcp-gateway@latest --url wss://run.blaxel.ai/{YOUR_WORKSPACE}/functions/{YOUR_MCP_SERVER_NAME}
 ```
 
-Or install locally:
+Or install globally:
+
+```bash
+npm install -g @blaxel/mcp-gateway
+mcp-gateway --url wss://run.blaxel.ai/{YOUR_WORKSPACE}/functions/{YOUR_MCP_SERVER_NAME}
+```
+
+Or install locally from source:
 
 ```bash
 git clone https://github.com/blaxel-ai/mcp-gateway
 cd mcp-gateway
 npm install
 npm run build
+node dist/index.mjs --url wss://run.blaxel.ai/{YOUR_WORKSPACE}/functions/{YOUR_MCP_SERVER_NAME}
 ```
 
 ## Configuration
 
-### Environment Variables
-
-Set the following environment variable to connect to your Blaxel MCP server:
+Pass the WebSocket URL with the `--url` flag. Example:
 
 ```bash
-MCP_WEBSOCKET_URL="wss://run.blaxel.ai/{YOUR_WORKSPACE}/functions/{YOUR_MCP_SERVER_NAME}"
+npx -y @blaxel/mcp-gateway@latest --url wss://run.blaxel.ai/{YOUR_WORKSPACE}/functions/{YOUR_MCP_SERVER_NAME}
 ```
 
 ### Authentication
@@ -82,7 +89,7 @@ export BL_WORKSPACE="your-workspace"
 
 ```bash
 npm run build    # Build the TypeScript code
-MCP_WEBSOCKET_URL="wss://run.blaxel.ai/{YOUR_WORKSPACE}/functions/{YOUR_MCP_SERVER_NAME}" npx @modelcontextprotocol/inspector node dist/index.js # Debug
+npx @modelcontextprotocol/inspector npx -y @blaxel/mcp-gateway@latest --url wss://run.blaxel.ai/{YOUR_WORKSPACE}/functions/{YOUR_MCP_SERVER_NAME} # Debug
 ```
 
 ### Project Structure

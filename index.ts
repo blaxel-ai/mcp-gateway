@@ -1,11 +1,20 @@
-import { MCPClient, init, listFunctions, newClient } from "@beamlit/sdk";
+import { BlaxelMcpClientTransport, settings } from "@blaxel/core";
+import { Client as ModelContextProtocolClient } from "@modelcontextprotocol/sdk/client/index.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
-  ListToolsRequestSchema,
-  Tool,
+  ListToolsRequestSchema
 } from "@modelcontextprotocol/sdk/types.js";
+
+// Configuration from environment variables
+const MCP_WEBSOCKET_URL = process.env.MCP_WEBSOCKET_URL;
+
+if (!MCP_WEBSOCKET_URL) {
+  console.error("MCP_WEBSOCKET_URL environment variable is required");
+  console.error("Format: wss://run.blaxel.ai/{WORKSPACE}/functions/{FUNCTION_NAME}");
+  process.exit(1);
+}
 
 // Server implementation
 const server = new Server(
@@ -20,79 +29,102 @@ const server = new Server(
   }
 );
 
-const clients: Record<string, { client: MCPClient; tools: Tool[] }> = {};
+let mcpClient: ModelContextProtocolClient | null = null;
+let transport: BlaxelMcpClientTransport | null = null;
 
-const listTools = async () => {
-  const settings = init();
-  const beamlit = newClient();
+const initializeMcpClient = async () => {
+  try {
+    // Initialize transport with Blaxel settings
+    transport = new BlaxelMcpClientTransport(
+      MCP_WEBSOCKET_URL,
+      settings.headers,
+      { retry: { max: 0 } }
+    );
 
-  const { response, data: functions } = await listFunctions({
-    client: beamlit,
-    query: { environment: "production" },
-  });
-  if (response.status >= 400) {
-    console.error(response.statusText);
-    throw new Error(response.statusText);
-  }
-  await Promise.all(
-    (functions ?? []).map(async (func) => {
-      if (func.metadata?.name && func.spec?.runtime?.type === "mcp") {
-        const url = `${settings.runUrl}/${settings.workspace}/functions/${func.metadata.name}`;
-        const mcpClient = new MCPClient(beamlit, url);
-        const toolsFunction = await mcpClient.listTools();
-        toolsFunction.tools.forEach((tool) => {
-          clients[tool.name] = {
-            client: mcpClient,
-            tools: [tool],
-          };
-        });
+    // Create MCP client
+    mcpClient = new ModelContextProtocolClient(
+      {
+        name: "mcp-gateway-client",
+        version: "1.0.0",
+      },
+      {
+        capabilities: {
+          tools: {},
+        },
       }
-      return "";
-    })
-  );
-  const tools = Object.values(clients).flatMap((client) => client.tools);
-  return {
-    tools,
-  };
+    );
+
+    // Connect to the MCP server
+    await mcpClient.connect(transport);
+
+    console.error(`Connected to MCP server at ${MCP_WEBSOCKET_URL}`);
+    return mcpClient;
+  } catch (error) {
+    console.error("Failed to initialize MCP client:", error);
+    throw error;
+  }
 };
 
-server.setRequestHandler(ListToolsRequestSchema, listTools);
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  try {
-    const client = clients[request.params.name];
-    if (!client) {
-      throw new Error(`Client not found for tool ${request.params.name}`);
-    }
-    const response = await client.client.callTool(
-      request.params.name,
-      request.params.arguments
-    );
-    return response;
-  } catch (error) {
-    return {
-      content: [
-        {
-          type: "text",
-          text: `Error: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        },
-      ],
-      isError: true,
-    };
-  }
-});
 
-async function runServer() {
+async function runServer(mcpClient: ModelContextProtocolClient) {
   const transport = new StdioServerTransport();
   await server.connect(transport);
+  server.setRequestHandler(ListToolsRequestSchema, async () => {
+    // List available tools
+    const toolsResponse = await mcpClient.listTools();
+    return toolsResponse;
+  });
+
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    try {
+      while (!mcpClient) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
+      const response = await mcpClient.callTool({
+        name: request.params.name,
+        arguments: request.params.arguments
+      });
+      return response;
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  });
   console.error("MCP Gateway Server running on stdio");
 }
-listTools().catch((error) => {
-  console.error("Fatal error running server:", error);
+
+// Initialize MCP client and start server
+initializeMcpClient()
+.then((mcpClient) => {
+  return runServer(mcpClient)
+    .catch((error) => {
+      console.error("Fatal error running server:", error);
+      process.exit(1);
+    });
+})
+.catch((error) => {
+  console.error("Fatal error initializing MCP client:", error);
   process.exit(1);
 });
-runServer().catch((error) => {
-  console.error("Fatal error running server:", error);
-  process.exit(1);
+
+// Cleanup on exit
+process.on('SIGINT', async () => {
+  console.error("Shutting down MCP Gateway...");
+  if (mcpClient) {
+    await mcpClient.close();
+  }
+  if (transport) {
+    await transport.close();
+  }
+  process.exit(0);
 });

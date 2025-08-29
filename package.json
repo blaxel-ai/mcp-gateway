@@ -1,15 +1,15 @@
 {
-  "name": "@beamlit/mcp-gateway",
+  "name": "@blaxel/mcp-gateway",
   "version": "1.0.1",
-  "description": "MCP Gateway for Beamlit",
+  "description": "MCP Gateway for Blaxel",
   "license": "MIT",
-  "author": "Beamlit, Inc. (https://beamlit.com)",
-  "homepage": "https://beamlit.com",
-  "bugs": "https://github.com/beamlit/mcp-gateway/issues",
+  "author": "Blaxel, Inc. (https://blaxel.ai)",
+  "homepage": "https://blaxel.ai",
+  "bugs": "https://github.com/blaxel-ai/mcp-gateway/issues",
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "https://github.com/beamlit/mcp-gateway.git"
+    "url": "https://github.com/blaxel-ai/mcp-gateway.git"
   },
   "scripts": {
     "build": "tsc && shx chmod +x dist/*.js",
@@ -25,8 +25,8 @@
     "dist"
   ],
   "dependencies": {
-    "@beamlit/sdk": "^0.0.41",
-    "@modelcontextprotocol/sdk": "1.0.1"
+    "@blaxel/core": "^0.2.31",
+    "@modelcontextprotocol/sdk": "^1.17.4"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",

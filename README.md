@@ -1,74 +1,110 @@
-# Beamlit MCP Server
+# Blaxel MCP Gateway
 
-An MCP (Model Context Protocol) server implementation for interacting with Beamlit CLI, enabling seamless integration with AI models.
+An MCP (Model Context Protocol) gateway that connects to Blaxel-hosted MCP servers and exposes them as stdio MCP servers for use in Cursor and other MCP-compatible clients.
 
 ## Features
 
-- **MCP Integration**: Full support for Model Context Protocol standards
-- **Beamlit CLI Integration**: Seamless interaction with Beamlit command-line interface
-- **Extensible Architecture**: Easy to extend and customize for specific use cases
+- **Blaxel MCP Integration**: Connect to any MCP server hosted on Blaxel
+- **Stdio Transport**: Exposes Blaxel MCP servers as stdio MCP servers
+- **Automatic Tool Discovery**: Automatically discovers and exposes all tools from the connected MCP server
+- **Cursor Integration**: Ready to use with Cursor and other MCP-compatible clients
 
-## Prerequisites
+## Usage
 
-### Required Software
+### Configuration
 
-- Beamlit CLI installed on your system
-- Node.js (version 16 or higher)
-- npm or yarn package manager
-
-### Installing Beamlit CLI
-
-## Configuration
-
-### Setting up MCP Server
-
-Add this configuration to your `claude_desktop_config.json`:
+Add this to your MCP configuration:
 
 ```json
 {
   "mcpServers": {
-    "beamlit": {
+    "blaxel-mcp": {
       "command": "npx",
-      "args": ["-y", "@beamlit/mcp-gateway"]
+      "args": [
+        "-y",
+        "@blaxel/mcp-gateway@latest"
+      ],
+      "env": {
+        "MCP_WEBSOCKET_URL": "wss://run.blaxel.ai/{YOUR_WORKSPACE}/functions/{YOUR_MCP_SERVER_NAME}"
+      }
     }
   }
 }
 ```
 
-## Usage
+## Prerequisites
 
-### Basic Commands
+- Node.js (version 16 or higher)
+- npm, yarn, or pnpm package manager
+- Blaxel account with deployed MCP servers
 
-```
-npm run watch # watch for changes and build mcp servers
-npm run start # run mcp server
-npm run client # run mcp client
-```
-
-### Integration with Claude Desktop
-
-1. Ensure Beamlit CLI is properly installed
-2. Configure your MCP server settings
-3. Connect through Claude Desktop interface
-
-## Development
-
-### Building from Source
+## Installation
 
 ```bash
-git clone https://github.com/your-repo/beamlit-mcp-gateway
-cd beamlit-mcp-gateway
+npm install -g @blaxel/mcp-gateway
+```
+
+Or install locally:
+
+```bash
+git clone https://github.com/blaxel-ai/mcp-gateway
+cd mcp-gateway
 npm install
 npm run build
 ```
 
+## Configuration
+
+### Environment Variables
+
+Set the following environment variable to connect to your Blaxel MCP server:
+
+```bash
+MCP_WEBSOCKET_URL="wss://run.blaxel.ai/{YOUR_WORKSPACE}/functions/{YOUR_MCP_SERVER_NAME}"
+```
+
+### Authentication
+
+The gateway uses Blaxel's automatic authentication. Make sure you're authenticated with Blaxel CLI:
+
+```bash
+bl login
+```
+
+Or set environment variables:
+
+```bash
+export BL_API_KEY="your-api-key"
+export BL_WORKSPACE="your-workspace"
+```
+
+## Development
+
+```bash
+npm run build    # Build the TypeScript code
+MCP_WEBSOCKET_URL="wss://run.blaxel.ai/{YOUR_WORKSPACE}/functions/{YOUR_MCP_SERVER_NAME}" npx @modelcontextprotocol/inspector node dist/index.js # Debug
+```
+
+### Project Structure
+
+- `index.ts` - Main MCP gateway implementation
+- `package.json` - Dependencies and scripts
+- `tsconfig.json` - TypeScript configuration
+
+## How It Works
+
+1. **Connection**: The gateway connects to a Blaxel MCP server via WebSocket using the provided URL
+2. **Tool Discovery**: It automatically discovers all available tools from the connected MCP server
+3. **Proxy**: It acts as a proxy, forwarding tool calls from the stdio client to the Blaxel MCP server
+4. **Response Handling**: It forwards responses back to the stdio client
+
 ## Troubleshooting
 
-Common issues and their solutions:
+### Common Issues
 
-- Server connection issues: Verify Beamlit CLI installation
-- Configuration errors: Check your `claude_desktop_config.json`
-- Permission issues: Ensure proper system permissions
+- **Connection Failed**: Verify your WebSocket URL and authentication
+- **No Tools Found**: Ensure your Blaxel MCP server is running and has tools
+- **Authentication Error**: Make sure you're logged in with Blaxel CLI or have valid API keys
 
 ## License
 
@@ -86,12 +122,12 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 For support, please:
 
-- Check the [documentation](https://docs.beamlit.dev)
+- Check the [Blaxel documentation](https://docs.blaxel.ai)
 - Open an issue in the GitHub repository
 - Contact the maintainers
 
 ## Acknowledgments
 
 - Model Context Protocol (MCP) community
-- Beamlit CLI contributors
-- Claude Desktop team
+- Blaxel team for the MCP hosting infrastructure
+- Cursor team for MCP integration

@@ -14,6 +14,7 @@ interface ReconnectConfig {
   initialDelay: number;
   maxDelay: number;
   backoffMultiplier: number;
+  healthCheckInterval: number;
 }
 
 const DEFAULT_RECONNECT_CONFIG: ReconnectConfig = {
@@ -21,6 +22,7 @@ const DEFAULT_RECONNECT_CONFIG: ReconnectConfig = {
   initialDelay: 1000, // 1 second
   maxDelay: 30000, // 30 seconds
   backoffMultiplier: 1.5,
+  healthCheckInterval: 30000, // 30 seconds
 };
 
 async function main() {
@@ -65,6 +67,8 @@ async function main() {
   let shouldReconnect = true;
   let retryCount = 0;
   let reconnectTimeout: NodeJS.Timeout | null = null;
+  let isConnected = false;
+  let healthCheckInterval: NodeJS.Timeout | null = null;
 
   const sleep = (ms: number): Promise<void> =>
     new Promise((resolve) => setTimeout(resolve, ms));
@@ -73,6 +77,87 @@ async function main() {
     const delay =
       config.initialDelay * Math.pow(config.backoffMultiplier, attempt);
     return Math.min(delay, config.maxDelay);
+  };
+
+  const markDisconnected = () => {
+    isConnected = false;
+    if (mcpClient) {
+      mcpClient = null;
+    }
+    if (healthCheckInterval) {
+      clearInterval(healthCheckInterval);
+      healthCheckInterval = null;
+    }
+  };
+
+  const scheduleReconnect = () => {
+    if (!shouldReconnect || reconnectTimeout) {
+      return;
+    }
+
+    markDisconnected();
+
+    const config = DEFAULT_RECONNECT_CONFIG;
+
+    if (config.maxRetries >= 0 && retryCount >= config.maxRetries) {
+      console.error(
+        `Max reconnection attempts (${config.maxRetries}) reached. Giving up.`
+      );
+      return;
+    }
+
+    const delay = calculateDelay(retryCount, config);
+    retryCount++;
+
+    console.error(
+      `Scheduling reconnection attempt ${retryCount} in ${delay}ms...`
+    );
+
+    reconnectTimeout = setTimeout(async () => {
+      reconnectTimeout = null;
+      console.error(`Attempting to reconnect (attempt ${retryCount})...`);
+
+      const client = await initializeMcpClient();
+      if (client) {
+        mcpClient = client;
+        isConnected = true;
+        startHealthCheck();
+        console.error("Successfully reconnected to MCP server");
+      }
+    }, delay);
+  };
+
+  const performHealthCheck = async (): Promise<boolean> => {
+    if (!mcpClient || !isConnected) {
+      return false;
+    }
+
+    try {
+      await mcpClient.listTools();
+      return true;
+    } catch (error) {
+      console.error("Health check failed:", error);
+      return false;
+    }
+  };
+
+  const startHealthCheck = () => {
+    if (healthCheckInterval) {
+      clearInterval(healthCheckInterval);
+    }
+
+    healthCheckInterval = setInterval(async () => {
+      if (!shouldReconnect) {
+        return;
+      }
+
+      const isHealthy = await performHealthCheck();
+      if (!isHealthy) {
+        console.error("Health check failed - connection appears to be down");
+        markDisconnected();
+        scheduleReconnect();
+      }
+    }, DEFAULT_RECONNECT_CONFIG.healthCheckInterval);
   };
 
   const initializeMcpClient =
@@ -123,31 +208,23 @@ async function main() {
           }
         );
 
-        // Set up connection event handlers
-        if (transport && "on" in transport) {
-          (transport as any).on("close", () => {
-            console.error("WebSocket connection closed");
-            if (shouldReconnect) {
-              scheduleReconnect();
-            }
-          });
-
-          (transport as any).on("error", (error: Error) => {
-            console.error("WebSocket connection error:", error);
-            if (shouldReconnect) {
-              scheduleReconnect();
-            }
-          });
-        }
-
         // Connect to the MCP server
         await mcpClient.connect(transport);
 
-        console.error(`Connected to MCP server at ${url}`);
-        retryCount = 0; // Reset retry count on successful connection
-        return mcpClient;
+        // Test the connection by trying to list tools
+        try {
+          await mcpClient.listTools();
+          console.error(`Connected to MCP server at ${url}`);
+          retryCount = 0; // Reset retry count on successful connection
+          isConnected = true;
+          return mcpClient;
+        } catch (testError) {
+          console.error("Connection test failed:", testError);
+          throw testError;
+        }
       } catch (error) {
         console.error("Failed to initialize MCP client:", error);
+        markDisconnected();
         if (shouldReconnect) {
           scheduleReconnect();
         }
@@ -157,55 +234,34 @@ async function main() {
       }
     };
 
-  const scheduleReconnect = () => {
-    if (!shouldReconnect || reconnectTimeout) {
-      return;
-    }
-
-    const config = DEFAULT_RECONNECT_CONFIG;
-
-    if (config.maxRetries >= 0 && retryCount >= config.maxRetries) {
-      console.error(
-        `Max reconnection attempts (${config.maxRetries}) reached. Giving up.`
-      );
-      return;
-    }
-
-    const delay = calculateDelay(retryCount, config);
-    retryCount++;
-
-    console.error(
-      `Scheduling reconnection attempt ${retryCount} in ${delay}ms...`
-    );
-
-    reconnectTimeout = setTimeout(async () => {
-      reconnectTimeout = null;
-      console.error(`Attempting to reconnect (attempt ${retryCount})...`);
-
-      const client = await initializeMcpClient();
-      if (!client) {
-        // initializeMcpClient will schedule another reconnect if needed
-        return;
-      }
-
-      mcpClient = client;
-      console.error("Successfully reconnected to MCP server");
-    }, delay);
-  };
-
   const waitForConnection = async (
     timeoutMs: number = 10000
   ): Promise<ModelContextProtocolClient | null> => {
     const startTime = Date.now();
 
     while (Date.now() - startTime < timeoutMs) {
-      if (mcpClient && !isConnecting) {
+      if (mcpClient && isConnected && !isConnecting) {
         return mcpClient;
       }
       await sleep(100);
     }
 
     return null;
+  };
+
+  const isConnectionError = (error: unknown): boolean => {
+    if (!(error instanceof Error)) return false;
+
+    const errorMessage = error.message.toLowerCase();
+    return (
+      errorMessage.includes("connection") ||
+      errorMessage.includes("socket") ||
+      errorMessage.includes("closed") ||
+      errorMessage.includes("disconnect") ||
+      errorMessage.includes("timeout") ||
+      errorMessage.includes("network") ||
+      errorMessage.includes("websocket")
+    );
   };
 
   async function runServer() {
@@ -224,12 +280,8 @@ async function main() {
       } catch (error) {
         console.error("Error listing tools:", error);
         // Trigger reconnection if the error suggests connection issues
-        if (
-          shouldReconnect &&
-          error instanceof Error &&
-          (error.message.includes("connection") ||
-            error.message.includes("socket"))
-        ) {
+        if (shouldReconnect && isConnectionError(error)) {
+          markDisconnected();
           scheduleReconnect();
         }
         throw error;
@@ -260,12 +312,8 @@ async function main() {
         console.error("Error calling tool:", error);
 
         // Trigger reconnection if the error suggests connection issues
-        if (
-          shouldReconnect &&
-          error instanceof Error &&
-          (error.message.includes("connection") ||
-            error.message.includes("socket"))
-        ) {
+        if (shouldReconnect && isConnectionError(error)) {
+          markDisconnected();
           scheduleReconnect();
         }
 
@@ -291,6 +339,8 @@ async function main() {
     const client = await initializeMcpClient();
     if (client) {
       mcpClient = client;
+      isConnected = true;
+      startHealthCheck();
     }
     await runServer();
   } catch (error) {
@@ -306,6 +356,11 @@ async function main() {
     if (reconnectTimeout) {
       clearTimeout(reconnectTimeout);
       reconnectTimeout = null;
+    }
+
+    if (healthCheckInterval) {
+      clearInterval(healthCheckInterval);
+      healthCheckInterval = null;
     }
 
     if (mcpClient) {

@@ -8,23 +8,6 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { parseArgs } from "node:util";
 
-// Reconnection configuration
-interface ReconnectConfig {
-  maxRetries: number;
-  initialDelay: number;
-  maxDelay: number;
-  backoffMultiplier: number;
-  healthCheckInterval: number;
-}
-
-const DEFAULT_RECONNECT_CONFIG: ReconnectConfig = {
-  maxRetries: -1, // Infinite retries
-  initialDelay: 1000, // 1 second
-  maxDelay: 30000, // 30 seconds
-  backoffMultiplier: 1.5,
-  healthCheckInterval: 30000, // 30 seconds
-};
-
 async function main() {
   const {
     values: { url },
@@ -63,327 +46,118 @@ async function main() {
 
   let mcpClient: ModelContextProtocolClient | null = null;
   let transport: BlaxelMcpClientTransport | null = null;
-  let isConnecting = false;
-  let shouldReconnect = true;
-  let retryCount = 0;
-  let reconnectTimeout: NodeJS.Timeout | null = null;
-  let isConnected = false;
-  let healthCheckInterval: NodeJS.Timeout | null = null;
 
-  const sleep = (ms: number): Promise<void> =>
-    new Promise((resolve) => setTimeout(resolve, ms));
-
-  const calculateDelay = (attempt: number, config: ReconnectConfig): number => {
-    const delay =
-      config.initialDelay * Math.pow(config.backoffMultiplier, attempt);
-    return Math.min(delay, config.maxDelay);
-  };
-
-  const markDisconnected = () => {
-    isConnected = false;
-    if (mcpClient) {
-      mcpClient = null;
-    }
-    if (healthCheckInterval) {
-      clearInterval(healthCheckInterval);
-      healthCheckInterval = null;
-    }
-  };
-
-  const scheduleReconnect = () => {
-    if (!shouldReconnect || reconnectTimeout) {
-      return;
-    }
-
-    markDisconnected();
-
-    const config = DEFAULT_RECONNECT_CONFIG;
-
-    if (config.maxRetries >= 0 && retryCount >= config.maxRetries) {
-      console.error(
-        `Max reconnection attempts (${config.maxRetries}) reached. Giving up.`
-      );
-      return;
-    }
-
-    const delay = calculateDelay(retryCount, config);
-    retryCount++;
-
-    console.error(
-      `Scheduling reconnection attempt ${retryCount} in ${delay}ms...`
-    );
-
-    reconnectTimeout = setTimeout(async () => {
-      reconnectTimeout = null;
-      console.error(`Attempting to reconnect (attempt ${retryCount})...`);
-
-      const client = await initializeMcpClient();
-      if (client) {
-        mcpClient = client;
-        isConnected = true;
-        startHealthCheck();
-        console.error("Successfully reconnected to MCP server");
-      }
-    }, delay);
-  };
-
-  const performHealthCheck = async (): Promise<boolean> => {
-    if (!mcpClient || !isConnected) {
-      return false;
-    }
-
+  const initializeMcpClient = async () => {
     try {
-      await mcpClient.listTools();
-      return true;
-    } catch (error) {
-      console.error("Health check failed:", error);
-      return false;
-    }
-  };
+      // Initialize transport with Blaxel settings
+      transport = new BlaxelMcpClientTransport(url, settings.headers, {
+        retry: { max: 0 },
+      });
 
-  const startHealthCheck = () => {
-    if (healthCheckInterval) {
-      clearInterval(healthCheckInterval);
-    }
-
-    healthCheckInterval = setInterval(async () => {
-      if (!shouldReconnect) {
-        return;
-      }
-
-      const isHealthy = await performHealthCheck();
-      if (!isHealthy) {
-        console.error("Health check failed - connection appears to be down");
-        markDisconnected();
-        scheduleReconnect();
-      }
-    }, DEFAULT_RECONNECT_CONFIG.healthCheckInterval);
-  };
-
-  const initializeMcpClient =
-    async (): Promise<ModelContextProtocolClient | null> => {
-      if (isConnecting) {
-        return null;
-      }
-
-      isConnecting = true;
-
-      try {
-        // Clean up existing connections
-        if (mcpClient) {
-          try {
-            await mcpClient.close();
-          } catch (error) {
-            console.error("Error closing existing MCP client:", error);
-          }
-          mcpClient = null;
-        }
-
-        if (transport) {
-          try {
-            await transport.close();
-          } catch (error) {
-            console.error("Error closing existing transport:", error);
-          }
-          transport = null;
-        }
-
-        // Initialize transport with Blaxel settings
-        transport = new BlaxelMcpClientTransport(
-          url,
-          settings.headers,
-          { retry: { max: 0 } } // Disable internal retry, we handle it ourselves
-        );
-
-        // Create MCP client
-        mcpClient = new ModelContextProtocolClient(
-          {
-            name: "mcp-gateway-client",
-            version: "1.0.0",
+      // Create MCP client
+      mcpClient = new ModelContextProtocolClient(
+        {
+          name: "mcp-gateway-client",
+          version: "1.0.0",
+        },
+        {
+          capabilities: {
+            tools: {},
           },
-          {
-            capabilities: {
-              tools: {},
-            },
-          }
-        );
-
-        // Connect to the MCP server
-        await mcpClient.connect(transport);
-
-        // Test the connection by trying to list tools
-        try {
-          await mcpClient.listTools();
-          console.error(`Connected to MCP server at ${url}`);
-          retryCount = 0; // Reset retry count on successful connection
-          isConnected = true;
-          return mcpClient;
-        } catch (testError) {
-          console.error("Connection test failed:", testError);
-          throw testError;
         }
-      } catch (error) {
-        console.error("Failed to initialize MCP client:", error);
-        markDisconnected();
-        if (shouldReconnect) {
-          scheduleReconnect();
-        }
-        return null;
-      } finally {
-        isConnecting = false;
-      }
-    };
+      );
 
-  const waitForConnection = async (
-    timeoutMs: number = 10000
-  ): Promise<ModelContextProtocolClient | null> => {
-    const startTime = Date.now();
+      // Connect to the MCP server
+      await mcpClient.connect(transport);
 
-    while (Date.now() - startTime < timeoutMs) {
-      if (mcpClient && isConnected && !isConnecting) {
-        return mcpClient;
-      }
-      await sleep(100);
+      console.error(`Connected to MCP server at ${url}`);
+      return mcpClient;
+    } catch (error) {
+      console.error("Failed to initialize MCP client:", error);
+      throw error;
     }
-
-    return null;
   };
 
-  const isConnectionError = (error: unknown): boolean => {
-    if (!(error instanceof Error)) return false;
-
-    const errorMessage = error.message.toLowerCase();
-    return (
-      errorMessage.includes("connection") ||
-      errorMessage.includes("socket") ||
-      errorMessage.includes("closed") ||
-      errorMessage.includes("disconnect") ||
-      errorMessage.includes("timeout") ||
-      errorMessage.includes("network") ||
-      errorMessage.includes("websocket")
-    );
-  };
-
-  async function runServer() {
-    const serverTransport = new StdioServerTransport();
-    await server.connect(serverTransport);
-
+  async function runServer(mcpClient: ModelContextProtocolClient) {
+    const transport = new StdioServerTransport();
+    await server.connect(transport);
     server.setRequestHandler(ListToolsRequestSchema, async () => {
-      const client = await waitForConnection();
-      if (!client) {
-        throw new Error("MCP client not available - connection may be down");
-      }
-
       try {
-        const toolsResponse = await client.listTools();
+        // List available tools
+        const toolsResponse = await mcpClient.listTools();
         return toolsResponse;
       } catch (error) {
-        console.error("Error listing tools:", error);
-        // Trigger reconnection if the error suggests connection issues
-        if (shouldReconnect && isConnectionError(error)) {
-          markDisconnected();
-          scheduleReconnect();
+        console.error("Connection lost, attempting to reconnect...");
+        try {
+          await initializeMcpClient();
+          const toolsResponse = await mcpClient!.listTools();
+          return toolsResponse;
+        } catch (reconnectError) {
+          console.error("Reconnection failed:", reconnectError);
+          throw error;
         }
-        throw error;
       }
     });
 
     server.setRequestHandler(CallToolRequestSchema, async (request) => {
       try {
-        const client = await waitForConnection();
-        if (!client) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: "Error: MCP client not available - connection may be down. Reconnection in progress...",
-              },
-            ],
-            isError: true,
-          };
+        while (!mcpClient) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
         }
 
-        const response = await client.callTool({
+        const response = await mcpClient.callTool({
           name: request.params.name,
           arguments: request.params.arguments,
         });
         return response;
       } catch (error) {
-        console.error("Error calling tool:", error);
-
-        // Trigger reconnection if the error suggests connection issues
-        if (shouldReconnect && isConnectionError(error)) {
-          markDisconnected();
-          scheduleReconnect();
+        console.error("Connection lost, attempting to reconnect...");
+        try {
+          await initializeMcpClient();
+          const response = await mcpClient!.callTool({
+            name: request.params.name,
+            arguments: request.params.arguments,
+          });
+          return response;
+        } catch (reconnectError) {
+          console.error("Reconnection failed:", reconnectError);
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Error: ${
+                  error instanceof Error ? error.message : String(error)
+                }`,
+              },
+            ],
+            isError: true,
+          };
         }
-
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Error: ${
-                error instanceof Error ? error.message : String(error)
-              }`,
-            },
-          ],
-          isError: true,
-        };
       }
     });
-
     console.error("Blaxel MCP Gateway Server running on stdio");
   }
 
   // Initialize MCP client and start server
   try {
     const client = await initializeMcpClient();
-    if (client) {
-      mcpClient = client;
-      isConnected = true;
-      startHealthCheck();
-    }
-    await runServer();
+    await runServer(client);
   } catch (error) {
     console.error("Fatal error:", error);
     process.exit(1);
   }
 
   // Cleanup on exit
-  const cleanup = async () => {
+  process.on("SIGINT", async () => {
     console.error("Shutting down Blaxel MCP Gateway...");
-    shouldReconnect = false;
-
-    if (reconnectTimeout) {
-      clearTimeout(reconnectTimeout);
-      reconnectTimeout = null;
-    }
-
-    if (healthCheckInterval) {
-      clearInterval(healthCheckInterval);
-      healthCheckInterval = null;
-    }
-
     if (mcpClient) {
-      try {
-        await mcpClient.close();
-      } catch (error) {
-        console.error("Error closing MCP client:", error);
-      }
+      await mcpClient.close();
     }
-
     if (transport) {
-      try {
-        await transport.close();
-      } catch (error) {
-        console.error("Error closing transport:", error);
-      }
+      await transport.close();
     }
-
     process.exit(0);
-  };
-
-  process.on("SIGINT", cleanup);
-  process.on("SIGTERM", cleanup);
+  });
 }
 
 main().catch(console.error);
